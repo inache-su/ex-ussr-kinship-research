@@ -281,6 +281,32 @@ class AuditCase(unittest.TestCase):
         self.assertTrue(any("living_status вне списка" in w and "P-0002" in w and "P-0001" not in w
                             for w in warnings))
 
+    def test_vocabularies_and_probably_living_default(self):
+        self.two_artifacts()
+        self.append("relationship-register.csv",
+                    RELATION.format(id="R-0001", claims="", artifacts="A-0001", groups="", status="hypothesis"))
+        self.update_row("relationship-register.csv", "R-0001", relationship_type="possible-father", confidence="medium")
+        self.update_row("person-register.csv", "P-0002", birth_estimate="около 1990 года")
+        self.append("search-log.csv", LOG.format(id="S-0001", query="Петров", source="Веб-поиск", status="found"))
+        warnings = self.audit()["warnings"]
+        for expected in ("relationship_type вне списка", "possible-father", "confidence вне списка", "R-0001",
+                         "но living_status не probably-living: P-0002", "название инструмента вместо сайта"):
+            self.assertTrue(any(expected in w for w in warnings), expected)
+
+    def test_hypothesis_chain_and_report_section(self):
+        self.append("person-register.csv", PERSON.format(id="P-0003"), PERSON.format(id="P-0004"))
+        self.append("relationship-register.csv",
+                    RELATION.format(id="R-0001", claims="", artifacts="", groups="", status="hypothesis"),
+                    RELATION.format(id="R-0002", claims="", artifacts="", groups="", status="hypothesis"))
+        self.update_row("relationship-register.csv", "R-0001", person_b_id="P-0003")
+        self.update_row("relationship-register.csv", "R-0002", person_a_id="P-0003", person_b_id="P-0004")
+        warnings = self.audit()["warnings"]
+        chain = [w for w in warnings if "гипотезы дальше одного звена" in w]
+        self.assertTrue(chain and "R-0002" in chain[0] and "R-0001" not in chain[0])
+        self.assertTrue(any("в разделе «Гипотезы» не упомянуты: R-0001" in w for w in warnings))
+        self.append("final-report.md", "", "| R-0001 | P-0001 — P-0003 | — | фамилия и место | акт о рождении |")
+        self.assertFalse(any("в разделе «Гипотезы»" in w for w in self.audit()["warnings"]))
+
     def test_summary_counts_open_items(self):
         self.two_artifacts()
         self.append("claims-register.csv",

@@ -9,6 +9,7 @@ import json
 import re
 import sys
 from collections import Counter
+from datetime import date
 from pathlib import Path
 from typing import Iterable
 
@@ -54,8 +55,25 @@ VALID_CLAIM_STATUSES = {
     "unresolved",
 }
 FINAL_STATUSES = CORROBORATED | {"contradicted"}
+EVIDENCED = CORROBORATED | {"single-source"}
 RESULT_STATUSES = {"found", "partial", "not-found", "blocked", "skipped"}
 LIVING_STATUSES = {"", "living", "probably-living", "deceased", "unknown"}
+RELATIONSHIP_TYPES = {
+    "parent-of", "step-parent-of", "spouse-of", "sibling-of", "godparent-of", "same-person", "relative-of",
+}
+CONFIDENCE = {"", "low", "moderate", "high"}
+TOOL_LABELS = {
+    "web", "web search", "web-search", "web.search", "web.run", "веб-поиск", "search", "поиск", "browser", "браузер",
+}
+
+
+def birth_year(value: str) -> int | None:
+    match = re.search(r"\b(1[5-9]\d\d|20\d\d)\b", value)
+    return int(match.group(1)) if match else None
+
+
+def mentioned(record_id: str, text: str) -> bool:
+    return re.search(rf"(?<![\w-]){re.escape(record_id)}(?!\w)", text) is not None
 
 
 def examples(items: list[str], limit: int = 5) -> str:
@@ -246,6 +264,32 @@ def main() -> int:
             f"person-register.csv: living_status вне списка {', '.join(sorted(LIVING_STATUSES - {''}))}: "
             + examples(odd_living)
         )
+    oldest_living = date.today().year - 100
+    unmarked = [
+        row.get("person_id") or "?"
+        for row in persons
+        if row.get("living_status", "").casefold() in {"", "unknown"}
+        and not row.get("death_estimate", "")
+        and (birth_year(row.get("birth_estimate", "")) or 0) > oldest_living
+    ]
+    if unmarked:
+        warnings.append(
+            "person-register.csv: родились меньше 100 лет назад без сведений о смерти, "
+            "но living_status не probably-living: " + examples(unmarked)
+        )
+    odd_types = sorted({row.get("relationship_type", "") or "пусто" for row in relationships} - RELATIONSHIP_TYPES)
+    if odd_types:
+        warnings.append(
+            f"relationship-register.csv: relationship_type вне списка {', '.join(sorted(RELATIONSHIP_TYPES))}: "
+            + examples(odd_types)
+        )
+    odd_confidence = [
+        row.get("claim_id") or row.get("relationship_id") or "?"
+        for row in claims + relationships
+        if row.get("confidence", "").casefold() not in CONFIDENCE
+    ]
+    if odd_confidence:
+        warnings.append("confidence вне списка low, moderate, high: " + examples(odd_confidence))
 
     for artifact_id, row in artifact_by_id.items():
         if not row.get("independence_group", "").strip():
@@ -354,6 +398,25 @@ def main() -> int:
                 "с указанным происхождением и локатором оригинала, образа или официальной выписки"
             )
 
+    # Гипотеза допустима на одно звено от субъекта дела или человека с подтверждённой связью.
+    intake = case_dir / "case-intake.yaml"
+    anchors = set(re.findall(r'person_id:\s*"?(P-\d+)', intake.read_text(encoding="utf-8"))) if intake.is_file() else set()
+    for row in relationships:
+        if row.get("status", "") in EVIDENCED:
+            anchors.update((row.get("person_a_id", ""), row.get("person_b_id", "")))
+    hypotheses = [row for row in relationships if row.get("status") == "hypothesis" and row.get("relationship_id")]
+    far = [
+        row["relationship_id"]
+        for row in hypotheses
+        if row.get("person_a_id") not in anchors and row.get("person_b_id") not in anchors
+    ]
+    if far:
+        warnings.append(
+            "relationship-register.csv: гипотезы дальше одного звена от субъекта дела или подтверждённой связи: "
+            + examples(far)
+            + "; держите их наводками в research-state.md"
+        )
+
     # Итоговый отчёт: ссылки и статусы должны совпадать с реестрами.
     markers: dict[str, int] = {}
     report = case_dir / "final-report.md"
@@ -384,13 +447,23 @@ def main() -> int:
             for row in relationships
             if row.get("relationship_id")
             and row.get("status", "") in FINAL_STATUSES
-            and not re.search(rf"(?<![\w-]){re.escape(row['relationship_id'])}(?!\w)", report_text)
+            and not mentioned(row["relationship_id"], report_text)
         ]
         if unreported:
             warnings.append(
                 "final-report.md: не упомянуты связи с итоговым статусом: "
                 + examples(unreported)
                 + "; обновите отчёт"
+            )
+        unreported_hypotheses = [
+            row["relationship_id"]
+            for row in hypotheses
+            if (row.get("person_a_id") in anchors or row.get("person_b_id") in anchors)
+            and not mentioned(row["relationship_id"], report_text)
+        ]
+        if unreported_hypotheses:
+            warnings.append(
+                "final-report.md: в разделе «Гипотезы» не упомянуты: " + examples(unreported_hypotheses)
             )
 
     # Журнал поиска: фиксированные статусы и повторы одного запроса в одном источнике.
@@ -409,6 +482,16 @@ def main() -> int:
             warnings.append(
                 f"search-log.csv: result_status вне списка {', '.join(sorted(RESULT_STATUSES))} "
                 f"в строках: {len(odd_status)} ({examples(odd_status)}); подробности пишите в blocker и next_step"
+            )
+        tools = [
+            row.get("search_id") or "?"
+            for row in log_rows
+            if row.get("source_or_domain", "").strip().casefold() in TOOL_LABELS
+        ]
+        if tools:
+            warnings.append(
+                f"search-log.csv: в source_or_domain название инструмента вместо сайта или архива: "
+                f"{len(tools)} ({examples(tools)})"
             )
         seen: dict[tuple[str, str], str] = {}
         repeats: list[str] = []
