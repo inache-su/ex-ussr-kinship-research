@@ -8,6 +8,15 @@ Coverage includes all 15 former Soviet republics: Russia, Ukraine, Belarus, Mold
 
 The skill's instructions are written in Russian, but **the agent talks to you in your language**: English, Ukrainian, Russian, Polish, German and so on. It quotes sources in their original spelling with a translation, and builds search queries in the languages of the records.
 
+## About this fork
+
+This repository, maintained by [inache-su](https://github.com/inache-su), is a fork of [DenisSergeevitch/ex-ussr-kinship-research](https://github.com/DenisSergeevitch/ex-ussr-kinship-research). It adds two behaviors to the original skill:
+
+- **Living relatives search.** The agent searches VK, Odnoklassniki, Facebook and memorial pages kept by descendants. It drafts first messages and sends them only on your instruction. The search runs by default; set `scope.modern_relatives_search: false` in the case intake to turn it off. See the [guidance](references/living-relatives-search.md).
+- **Research until you stop it.** The answer to your original question is an interim result. When one branch is exhausted, the agent moves on to earlier generations, ancestors' siblings and their descendants, spouses' lines and living relatives. It stops when you tell it to, at an environment limit, or when every remaining step waits for you or an outside reply.
+
+The fork's changes are listed under "Unreleased" in the [changelog](references/changelog.md). The skill checks this fork for updates, not the original repository.
+
 ---
 
 ## What it does
@@ -34,17 +43,17 @@ Clone the repository into your agent's skills folder:
 
 ```bash
 # Codex
-git clone https://github.com/DenisSergeevitch/ex-ussr-kinship-research ~/.codex/skills/ex-ussr-kinship-research
+git clone https://github.com/inache-su/ex-ussr-kinship-research ~/.codex/skills/ex-ussr-kinship-research
 
 # Claude Code (personal skills)
-git clone https://github.com/DenisSergeevitch/ex-ussr-kinship-research ~/.claude/skills/ex-ussr-kinship-research
+git clone https://github.com/inache-su/ex-ussr-kinship-research ~/.claude/skills/ex-ussr-kinship-research
 ```
 
 For a single project, put the folder in `.claude/skills/` inside the repository. The scripts need only Python 3 and the standard library; `build_pdf.py` also needs a Chromium-based browser.
 
 ## Use
 
-Describe the family question. The agent works from available information and continues while questions or access requests await a reply. For example:
+Describe the family question. The agent works from available information and continues while questions or access requests await a reply. After the first answer it keeps researching until you stop it; the other end conditions are listed in [About this fork](#about-this-fork). For example:
 
 - *"My great-grandfather was exiled to Kazakhstan in the 1930s. Help me find his parents in church records."*
 - *"Here are scans of a marriage certificate and a soldier card. Check whether they are the same person and build the evidence chain."*
@@ -114,4 +123,4 @@ Source-search helpers use Python's standard library and the existing case regist
 
 ---
 
-Maintained by Denis Shiryaev ([@DenisSergeevitch](https://github.com/DenisSergeevitch)).
+Original skill by Denis Shiryaev ([@DenisSergeevitch](https://github.com/DenisSergeevitch)). This fork is maintained by [inache-su](https://github.com/inache-su).
