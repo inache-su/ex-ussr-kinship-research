@@ -10,10 +10,11 @@ The skill's instructions are written in Russian, but **the agent talks to you in
 
 ## About this fork
 
-This repository, maintained by [inache-su](https://github.com/inache-su), is a fork of [DenisSergeevitch/ex-ussr-kinship-research](https://github.com/DenisSergeevitch/ex-ussr-kinship-research). It adds two behaviors to the original skill:
+This repository, maintained by [inache-su](https://github.com/inache-su), is a fork of [DenisSergeevitch/ex-ussr-kinship-research](https://github.com/DenisSergeevitch/ex-ussr-kinship-research). It changes the original skill in three ways:
 
 - **Living relatives search.** The agent searches VK, Odnoklassniki, Facebook and memorial pages kept by descendants. It drafts first messages and sends them only on your instruction. The search runs by default; set `scope.modern_relatives_search: false` in the case intake to turn it off. See the [guidance](references/living-relatives-search.md).
 - **Research until you stop it.** The answer to your original question is an interim result. When one branch is exhausted, the agent moves on to earlier generations, ancestors' siblings and their descendants, spouses' lines and living relatives. It stops when you tell it to, at an environment limit, or when every remaining step waits for you or an outside reply.
+- **Case tooling from real use.** Each case gets a research-state plan. The audit checks the search log, field values and relationships missing from the report, and a folder can be hashed into a `SHA256SUMS` manifest. When one target stops producing records, a per-target search budget turns it into an institutional request or moves research to the next branch.
 
 The fork's changes are listed under "Unreleased" in the [changelog](references/changelog.md). The skill checks this fork for updates, not the original repository.
 
@@ -95,7 +96,7 @@ references/
   habsburg-galicia-bukovina.md   Galicia and Bukovina under the Habsburgs and after
   familysearch-indexes.md       targeted browser research, permitted local snapshots and coverage
   ww1-search.md                 GWAR WWI person/locality search and source-image locators
-assets/                          case intake, CSV registers, final report template,
+assets/                          case intake, CSV registers, research-state plan, final report template,
                                  photos README template, readable PDF template (report-pdf.template.html)
 scripts/                         init_case.py, hash_artifact.py, audit_evidence.py, build_pdf.py
                                  familysearch.py, gwar.py, register_search.py and shared local analysis modules

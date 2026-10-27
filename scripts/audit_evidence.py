@@ -53,6 +53,15 @@ VALID_CLAIM_STATUSES = {
     "contradicted",
     "unresolved",
 }
+FINAL_STATUSES = CORROBORATED | {"contradicted"}
+RESULT_STATUSES = {"found", "partial", "not-found", "blocked", "skipped"}
+LIVING_STATUSES = {"", "living", "probably-living", "deceased", "unknown"}
+
+
+def examples(items: list[str], limit: int = 5) -> str:
+    """Сводный список для предупреждения: первые ID и число остальных."""
+    shown = ", ".join(items[:limit])
+    return shown + (f" и ещё {len(items) - limit}" if len(items) > limit else "")
 
 
 def split_ids(value: str) -> list[str]:
@@ -227,6 +236,17 @@ def main() -> int:
     claim_by_id = {row["claim_id"]: row for row in claims if row.get("claim_id")}
     person_ids = {row["person_id"] for row in persons if row.get("person_id")}
 
+    odd_living = [
+        row.get("person_id") or "?"
+        for row in persons
+        if row.get("living_status", "").casefold() not in LIVING_STATUSES
+    ]
+    if odd_living:
+        warnings.append(
+            f"person-register.csv: living_status вне списка {', '.join(sorted(LIVING_STATUSES - {''}))}: "
+            + examples(odd_living)
+        )
+
     for artifact_id, row in artifact_by_id.items():
         if not row.get("independence_group", "").strip():
             warnings.append(f"{artifact_id}: не указан independence_group")
@@ -249,6 +269,13 @@ def main() -> int:
         for artifact_id in referenced + contradictory:
             if artifact_id not in artifact_by_id:
                 errors.append(f"{claim_id}: неизвестный artifact_id {artifact_id}")
+        if referenced and all(
+            artifact_by_id.get(artifact_id, {}).get("source_type", "").casefold() == "research-note"
+            for artifact_id in referenced
+        ):
+            warnings.append(
+                f"{claim_id}: опирается только на заметки исследования (research-note); сошлитесь на исходные документы"
+            )
 
         groups = artifact_groups(referenced, artifact_by_id)
         for group in sorted(set(split_ids(row.get("supporting_independence_groups", "")))):
@@ -349,10 +376,57 @@ def main() -> int:
             for row in relationships
             if row.get("relationship_id")
         )
-        report_errors, markers = audit_report(
-            report.read_text(encoding="utf-8-sig"), known_ids, statuses
-        )
+        report_text = report.read_text(encoding="utf-8-sig")
+        report_errors, markers = audit_report(report_text, known_ids, statuses)
         errors.extend(report_errors)
+        unreported = [
+            row["relationship_id"]
+            for row in relationships
+            if row.get("relationship_id")
+            and row.get("status", "") in FINAL_STATUSES
+            and not re.search(rf"(?<![\w-]){re.escape(row['relationship_id'])}(?!\w)", report_text)
+        ]
+        if unreported:
+            warnings.append(
+                "final-report.md: не упомянуты связи с итоговым статусом: "
+                + examples(unreported)
+                + "; обновите отчёт"
+            )
+
+    # Журнал поиска: фиксированные статусы и повторы одного запроса в одном источнике.
+    log_path = case_dir / "search-log.csv"
+    if log_path.is_file():
+        log_rows, log_errors = read_csv(
+            log_path, {"search_id", "query", "source_or_domain", "result_status"}
+        )
+        errors.extend(log_errors)
+        odd_status = [
+            row.get("search_id") or "?"
+            for row in log_rows
+            if row.get("result_status", "").casefold() not in RESULT_STATUSES
+        ]
+        if odd_status:
+            warnings.append(
+                f"search-log.csv: result_status вне списка {', '.join(sorted(RESULT_STATUSES))} "
+                f"в строках: {len(odd_status)} ({examples(odd_status)}); подробности пишите в blocker и next_step"
+            )
+        seen: dict[tuple[str, str], str] = {}
+        repeats: list[str] = []
+        for row in log_rows:
+            query = " ".join(row.get("query", "").casefold().split())
+            if not query:
+                continue
+            key = (query, row.get("source_or_domain", "").strip().casefold())
+            search_id = row.get("search_id") or "?"
+            if key in seen:
+                repeats.append(f"{seen[key]}→{search_id}")
+            else:
+                seen[key] = search_id
+        if repeats:
+            warnings.append(
+                f"search-log.csv: повторы того же запроса в том же источнике: {len(repeats)} "
+                f"({examples(repeats)}); без нового основания не повторяйте, основание пишите в next_step"
+            )
 
     # Сводка готовности: что ещё не снято. Не ошибки — для решения, выдавать ли отчёт.
     summary = {

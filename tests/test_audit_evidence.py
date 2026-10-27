@@ -21,6 +21,7 @@ ARTIFACT = "{id},,title,url,,,,,,,P-0001,,,,direct,image-of-original,{group},cle
 CLAIM = "{id},text,P-0001,birth,{artifacts},{groups},,{status},moderate,rationale,"
 PERSON = "{id},,,,,,,,,,,,,,,"
 RELATION = "{id},P-0001,parent-of,P-0002,biological,{claims},{artifacts},,{groups},{status},moderate,rationale"
+LOG = "{id},,,,{query},,{source},,{status},,,,"
 
 
 class AuditCase(unittest.TestCase):
@@ -236,6 +237,49 @@ class AuditCase(unittest.TestCase):
         errors = self.audit()["errors"]
         self.assertTrue(any("R-0001 — в отчёте corroborated, в реестре single-source" in e for e in errors))
         self.assertTrue(any("C-0001 — в отчёте corroborated, в реестре single-source" in e for e in errors))
+
+    def test_init_creates_research_state(self):
+        self.assertTrue((self.case / "research-state.md").is_file())
+
+    def test_search_log_vocabulary_and_repeats(self):
+        self.append("search-log.csv",
+                    LOG.format(id="S-0001", query="Иванов  Пётр", source="ya.ru", status="found"),
+                    LOG.format(id="S-0002", query="Петров", source="ya.ru", status="нашлось 3"),
+                    LOG.format(id="S-0003", query="иванов пётр", source="ya.ru", status="not-found"),
+                    LOG.format(id="S-0004", query="Иванов Пётр", source="obd-memorial.ru", status="found"))
+        warnings = self.audit()["warnings"]
+        self.assertTrue(any("result_status вне списка" in w and "S-0002" in w and "S-0001" not in w
+                            for w in warnings))
+        self.assertTrue(any("в том же источнике: 1 " in w and "S-0001→S-0003" in w for w in warnings))
+
+    def test_claim_backed_only_by_research_notes_warns(self):
+        self.two_artifacts()
+        self.update_row("artifact-register.csv", "A-0001", source_type="research-note")
+        self.append("claims-register.csv",
+                    CLAIM.format(id="C-0001", artifacts="A-0001", groups="", status="single-source"),
+                    CLAIM.format(id="C-0002", artifacts="A-0001;A-0002", groups="", status="single-source"))
+        warnings = self.audit()["warnings"]
+        self.assertTrue(any(w.startswith("C-0001: опирается только на заметки") for w in warnings))
+        self.assertFalse(any(w.startswith("C-0002: опирается только на заметки") for w in warnings))
+
+    def test_final_relationship_missing_from_report_warns(self):
+        self.two_artifacts()
+        self.append("relationship-register.csv",
+                    RELATION.format(id="R-0001", claims="", artifacts="A-0001;A-0002", groups="",
+                                    status="corroborated"),
+                    RELATION.format(id="R-0002", claims="", artifacts="A-0001", groups="",
+                                    status="hypothesis"))
+        self.assertTrue(any("не упомянуты связи с итоговым статусом: R-0001" in w
+                            for w in self.audit()["warnings"]))
+        self.append("final-report.md", "", "### R-0001: P-0001 — отец — P-0002", "", "**Статус:** `corroborated`")
+        self.assertFalse(any("не упомянуты связи" in w for w in self.audit()["warnings"]))
+
+    def test_living_status_vocabulary(self):
+        self.update_row("person-register.csv", "P-0001", living_status="probably-living")
+        self.update_row("person-register.csv", "P-0002", living_status="жив?")
+        warnings = self.audit()["warnings"]
+        self.assertTrue(any("living_status вне списка" in w and "P-0002" in w and "P-0001" not in w
+                            for w in warnings))
 
     def test_summary_counts_open_items(self):
         self.two_artifacts()

@@ -1,5 +1,6 @@
 # Заполняйте из запроса и находок; неизвестные поля не требуют отдельного вопроса пользователю.
 # Оставляйте неизвестное пустым и дополняйте по ходу поиска.
+# Ход работы, очередь и блокировки ведите в research-state.md, не здесь.
 case_id: ""
 created_at: ""
 research_question: ""
@@ -15,6 +16,7 @@ scope:
   paid_sources_allowed: false
   third_party_upload_allowed: false
   contact_with_people_or_archives_allowed: false
+  free_institution_requests_preauthorized: false  # true — бесплатные запросы в архивы и ЗАГС отправлять без отдельного согласования
   modern_relatives_search: true  # шаг 6в: поиск живых родственников в соцсетях; false — пропускать
 
 user_authorization:
@@ -25,7 +27,7 @@ user_authorization:
 subjects:
   - person_id: "P-0001"
     label: ""
-    living_status: "unknown"
+    living_status: "unknown"  # living | probably-living | deceased | unknown
     names_as_provided: []
     estimated_birth: ""
     estimated_death: ""
@@ -34,6 +36,14 @@ subjects:
     occupation_or_status: []
     confession_or_community_as_recorded: []
     notes: ""
+
+requester:  # заявитель для запросов в учреждения; хранится только в папке дела, спрашивается один раз
+  full_name: ""
+  full_name_latin: ""
+  postal_address: ""
+  email: ""
+  id_document_type: ""
+  relation_to_subjects: ""
 
 prior_family_research:
   asked: false  # общий вопрос об имеющихся материалах, если они ещё не описаны (SKILL.md, шаг 1, п. 6)
