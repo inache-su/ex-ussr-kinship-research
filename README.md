@@ -23,6 +23,7 @@ The skill's instructions are written in Russian, but **the agent talks to you in
 - **Institutional requests.** Draft and, when authorized, send focused requests to archives, libraries, universities and museums using available email or official web tools. If needed, offer a supported mail integration or a ready-to-send letter. Record the outcome, avoid duplicate sends and treat replies as evidence. See [correspondence guidance](references/correspondence.md).
 - **Final report.** Every relationship is laid out edge by edge, with contradictions, failed searches and concrete next steps.
 - **Targeted indexed-record research.** Find relevant FamilySearch books by place or DGS through an existing lawful browser session, view specific records, and retain only evidence fragments permitted by the source. Local helpers search relatives, witnesses and name variants in saved fragments, preserving their context and file checksums. [Workflow and coverage limits](references/familysearch-indexes.md).
+- **Living relatives search.** Along researched family lines, the agent looks for living relatives on VK, Odnoklassniki, Facebook and memorial pages kept by descendants. When a network needs sign-in, it opens the login page in its browser and you sign in. It records a profile as a candidate only when a case detail besides the surname matches, such as an ancestor in their posts or a known relative, and the kinship stays a hypothesis until records confirm it. The agent drafts a first message and sends nothing without your instruction. [Guidance](references/living-relatives-search.md).
 - **WWI source search.** Search GWAR reports, hospital and award records by person or locality, then locate the source image. [Workflow](references/ww1-search.md). Both helpers feed the existing artifact register and search log; they do not establish identities or kinship automatically.
 
 Release history: [changelog](references/changelog.md).
@@ -77,6 +78,7 @@ references/
   ex-ussr-locale-guide.md        jurisdictions, name variants, calendars, record types by period
   browser-and-captcha.md         browsing, sign-in, one CAPTCHA attempt and hand-off, rate limits
   privacy-and-safety.md          living people, minors, DNA, sensitive findings
+  living-relatives-search.md     living relatives on social networks: sign-in, routes, candidates, contact
   seed-sources.md                curated starting resources with reliability classes
   field-lessons.md               practical lessons from a real case
   changelog.md                   release history
@@ -94,7 +96,7 @@ tests/                           unit tests (python3 -m unittest discover -s tes
 
 ## Responsible use
 
-- **Family history, not surveillance.** The skill refuses to look up current addresses, phones or accounts of living people, and it minimizes their data in reports.
+- **Family history, not surveillance.** The skill searches for living relatives, including on social networks, but it does not use leaked databases, people-search brokers or face recognition, does not look up minors and does not record phones, addresses or workplaces. Shared reports hide living people's data.
 - **Access checks.** The agent may try an actual CAPTCHA once through normal controls in its internal browser when supported and allowed. If user action is needed, it opens the relevant tab when possible and provides the URL and required action; sign-ins are done by the user. No external solvers, protection bypass, paywall, geo-block or rate-limit evasion, or leaked databases. See [browser guidance](references/browser-and-captcha.md).
 - **No uploads of your documents or DNA data** to third-party services without your explicit consent.
 - **Sensitive findings** (deportation, repression, adoption, DNA surprises) are reported neutrally and only as far as the question requires.

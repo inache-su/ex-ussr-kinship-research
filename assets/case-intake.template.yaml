@@ -15,6 +15,7 @@ scope:
   paid_sources_allowed: false
   third_party_upload_allowed: false
   contact_with_people_or_archives_allowed: false
+  modern_relatives_search: true  # шаг 6в: поиск живых родственников в соцсетях; false — пропускать
 
 user_authorization:
   relation_to_subjects: ""

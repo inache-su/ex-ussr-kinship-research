@@ -1,5 +1,10 @@
 # Release history
 
+## Unreleased
+
+- Keep researching until the user stops the work. The answer to the original question is reported as an interim result; when one branch is exhausted, the agent moves on to earlier generations, ancestors' siblings and their descendants, spouses' lines and living relatives. A report the user asks for is produced without ending the work. The agent ends a run only when the user tells it to stop, at an environment limit, or when every remaining step waits for the user or an outside reply.
+- Search for living relatives along researched lines on VK, Odnoklassniki, Facebook and memorial pages kept by descendants. When a network requires sign-in, the agent opens its login page for the user. It builds queries from case data, records a candidate only when a case detail besides the surname matches and keeps the kinship a hypothesis. It drafts first messages and sends them only on the user's instruction. The search runs by default; `scope.modern_relatives_search: false` turns it off. It does not use leaked databases, people-search brokers or face recognition, does not search for minors and does not record phones, addresses or workplaces.
+
 ## 1.7.0 — 2026-10-26
 
 - Add targeted use of public funeral-agency burial catalogs to locate historical gravestones, with task-relevant private evidence, claim-based source dependence and a verified general catalog link ([#37](https://github.com/DenisSergeevitch/ex-ussr-kinship-research/pull/37)).
