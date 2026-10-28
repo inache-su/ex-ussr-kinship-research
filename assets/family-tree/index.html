@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-__SCRIPT_HASH__'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'">
+  <title>Семейное древо</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='none' stroke='%231D5C57' stroke-width='2' d='M16 29V13M6 4v9h20V4M6 23v-6h20v6'/%3E%3C/svg%3E">
+  <style>__TREE_STYLE__</style>
+  <script id="tree-data" type="application/json">__TREE_DATA__</script>
+  <script id="tree-copy" type="application/json">__TREE_COPY__</script>
+</head>
+<body>
+<div class="app-shell js-only" id="app" data-section="tree">
+  <header class="topbar">
+    <div class="brand"><span class="brand-title" data-copy="title"></span><span class="brand-subtitle" data-copy="families"></span></div>
+    <nav class="main-nav" data-label="sections">
+      <button data-section="tree" aria-current="page" data-copy="tree"></button><button data-section="people" data-copy="people"></button><button data-section="places" data-copy="places"></button><button data-section="time" data-copy="time"></button><button data-section="archive" data-copy="archive"></button>
+    </nav>
+    <div class="search-wrap"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><input type="search" id="search" autocomplete="off" data-label="search" data-placeholder="searchPlaceholder"></div>
+    <button class="icon-button mobile-search-button" id="mobile-search-button" data-label="search" aria-expanded="false" aria-controls="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button>
+    <details class="download-menu"><summary data-label="archiveMenu"><span data-copy="archiveMenu"></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary><div><button id="export-svg" data-copy="downloadSvg"></button><button id="export-json" data-copy="downloadJson"></button><button id="open-help" data-copy="help"></button><p class="menu-note" data-copy="localCopy"></p><p class="menu-note" id="data-date"></p></div></details>
+  </header>
+  <div class="context-bar">
+    <button id="back" class="text-button" data-label="back" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12H4m6-6-6 6 6 6"/></svg><span data-copy="back"></span></button>
+    <span class="context-divider"></span>
+    <button id="root-person" class="root-context"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/></svg><span class="root-label" data-copy="rootPerson"></span><strong id="root-name"></strong></button>
+    <div class="view-switch" role="group" data-label="viewMode"><button data-view="all" aria-pressed="true" data-copy="all"></button><button data-view="family" aria-pressed="false" data-copy="familyView"></button><button data-view="ancestors" aria-pressed="false" data-copy="ancestors"></button><button data-view="descendants" aria-pressed="false" data-copy="descendants"></button><button data-view="path" aria-pressed="false" data-copy="kinshipPath"></button></div>
+    <select class="mobile-view" id="mobile-view" data-label="viewMode"><option value="all" data-copy="all"></option><option value="family" data-copy="familyView"></option><option value="ancestors" data-copy="ancestors"></option><option value="descendants" data-copy="descendants"></option><option value="path" data-copy="kinshipPath"></option></select>
+    <label class="branch-select"><span data-copy="branch"></span><select id="branch" data-label="branches"><option value="all" data-copy="allBranches"></option></select></label>
+    <details class="filters-menu"><summary><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10m-7 6h4"/></svg><span data-copy="filters"></span></summary><div><label><input id="show-hypotheses" type="checkbox" checked><span data-copy="showHypotheses"></span></label></div></details>
+  </div>
+  <main class="workspace">
+    <button id="panel-scrim" class="panel-scrim" data-label="closePeople" hidden></button>
+    <aside class="people-panel" id="people-panel" aria-labelledby="people-heading">
+      <button class="people-toggle" id="show-people" data-label="showPeople" aria-controls="people-content" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="7" r="3"/><path d="M3 20v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m4 10v-3a6 6 0 0 0-4-5"/></svg><span data-copy="people"></span></button>
+      <div class="people-content" id="people-content"><div class="list-heading"><h2 id="people-heading" data-copy="people"></h2><span id="list-count"></span><button class="icon-button" id="close-people" data-label="closePeople">×</button></div><p class="people-hint" data-copy="peopleHint"></p><div class="people-list" id="people-list"></div><footer class="sidebar-footer"><span data-copy="localCopy"></span><span data-copy="noUploads"></span></footer></div>
+    </aside>
+    <div class="main-view">
+      <section class="tree-view" id="tree-view" data-label="tree">
+        <div class="map-wrap" id="map-wrap">
+          <div id="viewport" class="pan-viewport" role="region" tabindex="0" data-label="canvasLabel"><div class="pan-surface" id="surface"><svg id="tree" xmlns="http://www.w3.org/2000/svg" role="group" data-label="overview"><title data-copy="title"></title><desc data-copy="canvasDescription"></desc><style id="svg-styles"></style><g id="sections"></g><g id="edges"></g><g id="nodes"></g></svg></div></div>
+          <div class="map-legend"><span><i class="document"></i><span data-copy="document"></span></span><span><i class="hypothesis"></i><span data-copy="hypothesis"></span></span><button id="legend-help" class="text-button" data-copy="legend"></button></div>
+          <div class="map-caption" id="map-caption" data-copy="moveHint"></div>
+          <div class="map-controls" role="group" data-label="zoomLabel"><div class="zoom-control"><button id="zoom-out" data-label="zoomOut">−</button><output id="zoom-value"></output><button id="zoom-in" data-label="zoomIn">+</button></div><button id="fit" class="control-button" data-label="fit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3H3v6m12-6h6v6M3 15v6h6m6 0h6v-6"/></svg><span data-copy="fitBranch"></span></button><button id="center-me" class="control-button" data-label="centerMe"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="6"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/></svg><span data-copy="toRoot"></span></button></div>
+          <aside class="detail-panel" id="detail-panel" aria-labelledby="detail-title" hidden><div class="panel-header"><span id="panel-kicker" data-copy="personCard"></span><button class="icon-button" id="detail-close" data-label="close">×</button></div><div id="detail-content"></div></aside>
+        </div>
+      </section>
+      <section class="section-view" id="section-view" aria-labelledby="section-title" hidden><div class="section-heading"><p id="section-kicker"></p><h1 id="section-title" tabindex="-1"></h1><p id="section-description"></p></div><div id="section-content"></div></section>
+    </div>
+  </main>
+  <footer class="status-bar"><h1 id="view-title" data-copy="all"></h1><span id="summary"></span><p id="map-status" aria-live="polite"></p></footer>
+</div>
+<dialog id="help-dialog" aria-labelledby="help-title"><button class="icon-button dialog-close" data-close-dialog="help-dialog" data-label="close">×</button><h2 id="help-title" data-copy="legend"></h2><p data-copy="canvasDescription"></p><p data-copy="canvasLabel"></p><div class="legend-items"><span><i class="document"></i><span data-copy="document"></span></span><span><i class="hypothesis"></i><span data-copy="hypothesis"></span></span><span><i class="spiritual"></i><span data-copy="spiritual"></span></span><span><i class="unplaced"></i><span data-copy="unplaced"></span></span></div><p data-copy="noUploads"></p></dialog>
+<dialog id="path-dialog" aria-labelledby="path-title"><button class="icon-button dialog-close" data-close-dialog="path-dialog" data-label="close">×</button><h2 id="path-title" data-copy="kinshipPath"></h2><p data-copy="pathExplanation"></p><form id="path-form" method="dialog"><label><span data-copy="pathFrom"></span><select id="path-from" required></select></label><label><span data-copy="pathTo"></span><select id="path-to" required></select></label><label class="check-label"><input id="path-versions" type="checkbox"><span data-copy="includeVersions"></span></label><button type="submit" class="primary-button" data-copy="showPath"></button></form></dialog>
+<noscript>__NO_SCRIPT__</noscript>
+<script>__TREE_SCRIPT__</script>
+</body>
+</html>

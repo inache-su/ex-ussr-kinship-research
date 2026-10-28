@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Build a static HTML family tree from the case registers."""
+"""Build an offline interactive family atlas from the case registers."""
 
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
+import hashlib
 import html
 import json
 import re
@@ -13,6 +15,9 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
+from audit_evidence import split_ids
+from research_common import atomic_bytes
+
 PARENT = "parent-of"
 SAME_ROW = {"spouse-of", "sibling-of"}
 # Старые дела до словаря relationship_type (SKILL.md, шаг 2).
@@ -20,16 +25,11 @@ LEGACY = {"mother": PARENT, "father": PARENT, "possible-father": PARENT,
           "spouse": "spouse-of", "possible-siblings": "sibling-of"}
 EVIDENCED = {"single-source", "corroborated", "strongly-corroborated"}
 LIVING = {"living", "probably-living"}
-LABELS = {
-    PARENT: ("ребёнок", "родитель"),
-    "step-parent-of": ("пасынок или падчерица", "отчим или мачеха"),
-    "godparent-of": ("крестник или крестница", "восприемник или восприемница"),
-    "spouse-of": ("супруг или супруга", "супруг или супруга"),
-    "sibling-of": ("брат или сестра", "брат или сестра"),
-    "same-person": ("возможно, тот же человек", "возможно, тот же человек"),
-    "relative-of": ("родственник", "родственник"),
-}
 esc = html.escape
+ASSETS = Path(__file__).resolve().parent.parent / "assets" / "family-tree"
+KINDS = {PARENT: "parent", "spouse-of": "spouse", "sibling-of": "sibling",
+         "step-parent-of": "step", "godparent-of": "godparent",
+         "same-person": "same-person", "relative-of": "unplaced"}
 
 
 def read(path: Path) -> list[dict[str, str]]:
@@ -126,146 +126,180 @@ def dates(person: dict[str, str]) -> str:
     return str(born or "")
 
 
-def card(pid, person, relations, shared, names) -> str:
-    meta = pid if shared and maybe_living(person) else " · ".join(filter(None, [pid, dates(person)]))
-    items = "".join(
-        f"<li>{esc(role)}: {esc(names[other])} <span class=\"status\">{esc(status or 'без статуса')}</span></li>"
-        for role, other, status in relations
-    )
-    details = f"<details><summary>Связи ({len(relations)})</summary><ul>{items}</ul></details>" if relations else ""
-    return (f'<article class="person" id="{esc(pid)}"><h3>{esc(names[pid])}</h3>'
-            f'<p class="meta">{esc(meta)}</p>{details}</article>')
+def atlas(case_dir: Path, shared: bool) -> tuple[dict, dict[str, int]]:
+    rows = [p for p in read(case_dir / "person-register.csv") if p.get("person_id")
+            and p.get("candidate_status", "").casefold() != "superseded"]
+    persons = {p["person_id"]: p for p in rows}
+    if len(persons) != len(rows):
+        raise ValueError("повтор person_id в person-register.csv")
+    artifacts = {a["artifact_id"]: a for a in read(case_dir / "artifact-register.csv") if a.get("artifact_id")}
+    claims = {c["claim_id"]: c for c in read(case_dir / "claims-register.csv") if c.get("claim_id")}
+
+    def sources(ids):
+        result = []
+        for aid in dict.fromkeys(ids):
+            artifact = artifacts.get(aid, {})
+            title = "Источник из реестра дела" if shared else " · ".join(filter(None, [
+                artifact.get("source_title"), artifact.get("archival_reference"), artifact.get("record_date")]))
+            result.append({"id": aid, "title": title or aid,
+                           "locator": "" if shared else artifact.get("source_url_or_path", "")})
+        return result
+
+    relationships, edges, seen = [], [], set()
+    for number, row in enumerate(read(case_dir / "relationship-register.csv"), start=2):
+        a, b = row.get("person_a_id", ""), row.get("person_b_id", "")
+        if a not in persons or b not in persons:
+            continue  # Связи исключённых кандидатов, как и прежде, не переносятся.
+        rid = row.get("relationship_id", "")
+        if not rid or rid in seen or a == b:
+            raise ValueError(f"неверный или повторный relationship_id либо связь с собой, строка {number}")
+        seen.add(rid)
+        kind = LEGACY.get(row.get("relationship_type", ""), row.get("relationship_type", ""))
+        if kind not in KINDS:
+            raise ValueError(f"неизвестный relationship_type: {kind} ({rid})")
+        status = row.get("status", "")
+        artifact_ids = split_ids(row.get("supporting_artifact_ids", "")) + split_ids(row.get("contradicting_artifact_ids", ""))
+        for cid in split_ids(row.get("claim_ids", "")):
+            artifact_ids.extend(split_ids(claims.get(cid, {}).get("artifact_ids", "")))
+        relationships.append({
+            "id": rid, "from": a, "to": b, "kind": KINDS[kind],
+            "status": "contradicted" if status == "contradicted" else "document" if status in EVIDENCED else "hypothesis",
+            "evidenceStatus": status, "relationshipType": kind,
+            "note": "" if shared else row.get("rationale", ""),
+            "sources": sources(artifact_ids), "claimIds": split_ids(row.get("claim_ids", "")),
+        })
+        if status != "contradicted":
+            edges.append((a, kind, b))
+
+    linked = sorted({pid for a, _, b in edges for pid in (a, b)})
+    loose = sorted(set(persons) - set(linked))
+    gen = generations(linked, edges)
+    groups = components(linked, edges)
+    people = {}
+    for pid, person in persons.items():
+        hidden = shared and maybe_living(person)
+        related_claims = [c for c in claims.values() if pid in split_ids(c.get("subject_person_ids", ""))]
+        artifact_ids = split_ids(person.get("source_artifact_ids", ""))
+        for claim in related_claims:
+            artifact_ids.extend(split_ids(claim.get("artifact_ids", "")))
+        for edge in relationships:
+            if pid in (edge["from"], edge["to"]):
+                artifact_ids.extend(s["id"] for s in edge["sources"])
+        paragraphs = [f"{label}: {person[field]}" for field, label in [
+            ("places", "Места"), ("historical_jurisdictions", "Исторические юрисдикции"),
+            ("occupation_or_status", "Занятие или сословие"),
+            ("confession_or_community_as_recorded", "Конфессия или община в источнике"),
+            ("relatives_as_reported", "Родственники по сообщению источника"),
+            ("candidate_status", "Статус кандидата"), ("merge_or_split_rationale", "Основания сопоставления"),
+        ] if person.get(field)]
+        if person.get("notes"):
+            paragraphs.append(person["notes"])
+        paragraphs.extend(f"{c['claim_id']} [{c.get('status') or 'без статуса'}]: {c.get('claim_text', '')}"
+                          for c in related_claims)
+        aliases = list(dict.fromkeys(split_ids(person.get("names_as_written", ""))
+                                    + split_ids(person.get("normalized_name_variants", ""))))
+        people[pid] = {
+            "id": pid, "name": name_of(person, shared), "surname": "", "patronymic": "",
+            "birth": "" if hidden else person.get("birth_estimate", ""),
+            "death": "" if hidden else person.get("death_estimate", ""),
+            "birth_year": None if hidden else birth_year(person.get("birth_estimate", "")),
+            "death_year": None if hidden else birth_year(person.get("death_estimate", "")),
+            "life": "" if hidden else dates(person), "role": pid, "record": pid,
+            "aliases": [] if shared else aliases,
+            # Свободный текст даже об умершем может называть живых родственников.
+            "bio": "Подробности скрыты в версии для обмена." if shared else "\n\n".join(paragraphs) or "Сведения в реестре пока не заполнены.",
+            "sources": sources(artifact_ids),
+        }
+
+    # shortcut: generation rows can cross; use a graph layout engine if dense branches become unreadable.
+    card_w, card_h, gap, step = 224, 128, 48, 240
+    sections, branches = [], {}
+    x, bottom = 56, 0
+    for number, group in enumerate(groups, start=1):
+        key, label = f"c{number}", f"Связанная группа {number}"
+        branches[key] = label
+        sections.append({"x": x, "y": 80, "text": label})
+        rows = order_rows(group, gen, edges)
+        width = max(map(len, rows)) * (card_w + gap) - gap
+        for row in rows:
+            start = x + (width - len(row) * (card_w + gap) + gap) / 2
+            for index, pid in enumerate(row):
+                people[pid].update(x=start + index * (card_w + gap), y=100 + gen[pid] * step, family=key)
+                bottom = max(bottom, people[pid]["y"] + card_h)
+        x += width + 112
+    if loose:
+        y = bottom + 160 if groups else 100
+        branches["unlinked"] = "Записи без связей"
+        sections.append({"x": 56, "y": y - 40, "text": branches["unlinked"]})
+        for index, pid in enumerate(loose):
+            people[pid].update(x=56 + index % 4 * (card_w + gap), y=y + index // 4 * step, family="unlinked")
+        bottom = max(p["y"] + card_h for p in people.values())
+    width = max(x, 112 + min(4, len(loose)) * (card_w + gap) - gap, 640)
+    unions = []
+    for edge in relationships:
+        a, b = people[edge["from"]], people[edge["to"]]
+        edge["rail"] = max(a["y"], b["y"]) + card_h + 36
+        edge["labelX"] = (a["x"] + b["x"] + card_w) / 2
+        if edge["kind"] == "parent" and edge["status"] != "contradicted":
+            unions.append({"parents": [a["id"]], "children": [b["id"]], "rail": a["y"] + card_h + 40})
+    counts = {"persons": len(people), "linked": len(linked), "unlinked": len(loose), "groups": len(groups)}
+    return {"title": "Семейное древо", "updated": date.today().isoformat(),
+            "width": width, "height": max(bottom + 120, 360), "cardWidth": card_w, "cardHeight": card_h,
+            "people": list(people.values()), "relationships": relationships, "unions": unions,
+            "sections": sections, "branches": branches}, counts
+
+
+def embedded(value) -> str:
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
 def build(case_dir: Path, shared: bool) -> tuple[str, dict[str, int]]:
-    persons = {p["person_id"]: p for p in read(case_dir / "person-register.csv")
-               if p.get("person_id") and p.get("candidate_status", "").casefold() != "superseded"}
-    names = {pid: name_of(p, shared) for pid, p in persons.items()}
-    drawn, relations = [], defaultdict(list)
-    for row in read(case_dir / "relationship-register.csv"):
-        a, b = row.get("person_a_id", ""), row.get("person_b_id", "")
-        if a not in persons or b not in persons:
-            continue
-        kind = LEGACY.get(row.get("relationship_type", ""), row.get("relationship_type", ""))
-        status = row.get("status", "")
-        to_b, to_a = LABELS.get(kind, (kind, kind))
-        relations[a].append((to_b, b, status))
-        relations[b].append((to_a, a, status))
-        if status != "contradicted":  # опровергнутые связи видны только в карточках
-            drawn.append((a, kind, b, status in EVIDENCED))
-    edges = [(a, kind, b) for a, kind, b, _ in drawn]
-    linked = sorted({pid for a, _, b in edges for pid in (a, b)})
-    gen = generations(linked, edges)
-    sections, edge_data = [], {}
-    for number, group in enumerate(components(linked, edges), start=1):
-        members = set(group)
-        rows = "".join(
-            '<div class="row">' + "".join(card(pid, persons[pid], relations[pid], shared, names) for pid in row) + "</div>"
-            for row in order_rows(group, gen, edges)
-        )
-        edge_data[f"c{number}"] = [[a, b, "parent" if kind == PARENT else "row", not proved]
-                                   for a, kind, b, proved in drawn if a in members]
-        sections.append(f'<section class="component" id="c{number}"><svg aria-hidden="true"></svg>{rows}</section>')
-    loose = [pid for pid in sorted(persons) if pid not in set(linked)]
-    loose_html = "".join(card(pid, persons[pid], relations[pid], shared, names) for pid in loose)
-    counts = {"persons": len(persons), "linked": len(linked), "unlinked": len(loose), "groups": len(sections)}
-    page = TEMPLATE.format(
-        # имя папки дела часто содержит имя живого человека
-        title="" if shared else f" · {esc(case_dir.name)}",
-        case="" if shared else f"Дело {esc(case_dir.name)} · ",
-        mode="версия для обмена: живые люди — инициалы, без дат" if shared else "рабочая версия",
-        today=date.today().isoformat(),
-        summary=f"Людей: {counts['persons']}, в дереве: {counts['linked']}, без связей: {counts['unlinked']}.",
-        groups="".join(sections) or "<p>Связей в реестре пока нет.</p>",
-        loose=f'<div class="loose">{loose_html}</div>' if loose else "<p>Нет.</p>",
-        edges=json.dumps(edge_data, ensure_ascii=False).replace("</", "<\\/"),
-    )
+    data, counts = atlas(case_dir, shared)
+    copy = json.loads((ASSETS / "ui.json").read_text(encoding="utf-8"))
+    copy["families"] = "Версия для обмена" if shared else f"Дело {case_dir.name} · рабочая версия"
+    fallback = [f'<main class="no-js-fallback"><h1>{esc(copy["title"])}</h1><p>{esc(copy["noJs"])}</p>']
+    for person in data["people"]:
+        fallback.append(f'<details id="{esc(person["id"])}"><summary>{esc(person["name"])}</summary>'
+                        + f'<p>{esc(person["life"])}</p>'
+                        + "".join(f"<p>{esc(p)}</p>" for p in person["bio"].split("\n\n")) + "</details>")
+    fallback.append("</main>")
+    font_css = (ASSETS / "fonts" / "fonts.css").read_text(encoding="utf-8")
+    for filename in dict.fromkeys(re.findall(r"url\(([^)]+)\)", font_css)):
+        font = base64.b64encode((ASSETS / "fonts" / filename).read_bytes()).decode("ascii")
+        font_css = font_css.replace(f"url({filename})", f"url(data:font/woff2;base64,{font})")
+    css = (ASSETS / "style.css").read_text(encoding="utf-8").replace('@import url("fonts/fonts.css");', font_css)
+    script = (ASSETS / "app.js").read_text(encoding="utf-8")
+    digest = base64.b64encode(hashlib.sha256(script.encode("utf-8")).digest()).decode("ascii")
+    page = (ASSETS / "index.html").read_text(encoding="utf-8")
+    # Заменяем только маркеры шаблона; данные не должны становиться шаблоном.
+    replacements = {"__TREE_DATA__": embedded(data), "__TREE_COPY__": embedded(copy),
+                    "__NO_SCRIPT__": "".join(fallback), "__TREE_STYLE__": css,
+                    "__TREE_SCRIPT__": script, "__SCRIPT_HASH__": digest}
+    page = re.sub(r"__(?:TREE_DATA|TREE_COPY|NO_SCRIPT|TREE_STYLE|TREE_SCRIPT|SCRIPT_HASH)__",
+                  lambda match: replacements[match.group()], page)
     return page, counts
 
 
-TEMPLATE = """<!doctype html>
-<html lang="ru">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="referrer" content="no-referrer">
-<title>Семейное дерево{title}</title>
-<style>
-:root{{--bg:#edf2f5;--paper:#fff;--ink:#233b4a;--muted:#536b79;--line:#cfdae1;--proved:#29685c;--hyp:#8b611c}}
-*{{box-sizing:border-box}}
-body{{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}}
-main{{max-width:1400px;margin:0 auto;padding:24px 16px 48px}}
-h1{{font-size:24px;margin:0 0 4px}}h2{{font-size:18px;margin:32px 0 12px}}h3{{font-size:15px;margin:0}}
-.lead,.meta{{color:var(--muted);margin:0}}.meta{{font-size:13px}}
-.legend{{display:flex;flex-wrap:wrap;gap:16px;margin:12px 0 0;color:var(--muted);font-size:13px}}
-.legend i{{display:inline-block;width:32px;border-top:2px solid var(--proved);vertical-align:middle;margin-right:6px}}
-.legend i.hyp{{border-top:2px dashed var(--hyp)}}
-.component{{position:relative;overflow-x:auto;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:16px}}
-.component svg{{position:absolute;inset:0;pointer-events:none}}
-.row{{position:relative;display:flex;gap:16px;justify-content:center;align-items:flex-start;margin:0 0 40px;min-width:max-content}}.row:last-child{{margin-bottom:0}}
-.person{{position:relative;z-index:1;width:200px;background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:10px 12px}}
-.person:target{{outline:2px solid var(--proved)}}
-details{{margin-top:6px;font-size:13px}}summary{{cursor:pointer;color:var(--muted)}}
-ul{{margin:6px 0 0;padding-left:18px}}.status{{color:var(--muted)}}
-line{{stroke:var(--proved);stroke-width:1.5}}line.hyp{{stroke:var(--hyp);stroke-dasharray:6 4}}
-.loose{{display:flex;flex-wrap:wrap;gap:12px}}
-@media print{{body{{background:#fff}}.component{{break-inside:avoid}}}}
-</style>
-</head>
-<body>
-<main>
-<h1>Семейное дерево</h1>
-<p class="lead">{case}{mode} · собрано {today}. {summary}</p>
-<p class="legend"><span><i></i>связь подтверждена записью (single-source и выше)</span><span><i class="hyp"></i>гипотеза или нерешённая связь</span></p>
-<h2>Связанные группы</h2>
-{groups}
-<h2>Записи без связей</h2>
-{loose}
-</main>
-<script type="application/json" id="edges">{edges}</script>
-<script>
-const EDGES = JSON.parse(document.getElementById('edges').textContent);
-function draw() {{
-  for (const [id, list] of Object.entries(EDGES)) {{
-    const box = document.getElementById(id), svg = box.querySelector('svg'), at = box.getBoundingClientRect();
-    svg.setAttribute('width', box.scrollWidth); svg.setAttribute('height', box.scrollHeight); svg.replaceChildren();
-    for (const [a, b, kind, hyp] of list) {{
-      const A = document.getElementById(a).getBoundingClientRect(), B = document.getElementById(b).getBoundingClientRect();
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      const dx = box.scrollLeft - at.left, dy = box.scrollTop - at.top;
-      line.setAttribute('x1', A.left + A.width / 2 + dx); line.setAttribute('x2', B.left + B.width / 2 + dx);
-      line.setAttribute('y1', (kind === 'parent' ? A.bottom : A.top + A.height / 2) + dy);
-      line.setAttribute('y2', (kind === 'parent' ? B.top : B.top + B.height / 2) + dy);
-      if (hyp) line.setAttribute('class', 'hyp');
-      svg.appendChild(line);
-    }}
-  }}
-}}
-addEventListener('load', draw); addEventListener('resize', draw);
-document.querySelectorAll('details').forEach(d => d.addEventListener('toggle', draw));
-</script>
-</body>
-</html>
-"""
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Строит HTML-страницу семейного дерева из реестров дела.")
+    parser = argparse.ArgumentParser(description="Строит интерактивную HTML-карту семьи из реестров дела.")
     parser.add_argument("--case-dir", required=True, help="Директория дела")
     parser.add_argument("--out", help="Файл страницы; по умолчанию tree.html (tree-shared.html с --shared) в деле")
-    parser.add_argument("--shared", action="store_true", help="Версия для обмена: живые люди — инициалы, без дат")
+    parser.add_argument("--shared", action="store_true", help="Версия для обмена: живые люди — инициалы, без дат; свободные тексты скрыты")
     args = parser.parse_args()
     case_dir = Path(args.case_dir).expanduser().resolve()
     if not (case_dir / "person-register.csv").is_file():
         print(f"Ошибка: не найден person-register.csv в {case_dir}", file=sys.stderr)
         return 2
+    out = Path(args.out).expanduser().resolve() if args.out else case_dir / ("tree-shared.html" if args.shared else "tree.html")
+    if out in {(case_dir / name).resolve() for name in ("person-register.csv", "relationship-register.csv", "artifact-register.csv", "claims-register.csv")}:
+        print("Ошибка: HTML не должен перезаписывать реестры дела", file=sys.stderr)
+        return 2
     try:
         page, counts = build(case_dir, args.shared)
-    except ValueError as exc:
+        atomic_bytes(out, page.encode("utf-8"))
+    except (ValueError, OSError) as exc:
         print(f"Ошибка: {exc}", file=sys.stderr)
         return 1
-    out = Path(args.out).expanduser() if args.out else case_dir / ("tree-shared.html" if args.shared else "tree.html")
-    out.write_text(page, encoding="utf-8")
     print(f"{out}: людей {counts['persons']}, в дереве {counts['linked']}, без связей {counts['unlinked']}, групп {counts['groups']}")
     return 0
 

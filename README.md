@@ -66,6 +66,8 @@ Keep private case data outside the skill's Git checkout. From the skill folder:
 python scripts/init_case.py --case-dir ~/kinship-cases/my-case --research-question "Who were Maria's parents?" --subject-label "Maria"
 python scripts/hash_artifact.py ~/kinship-cases/my-case/scans/marriage-1902.jpg   # SHA-256 for every saved artifact
 python scripts/audit_evidence.py --case-dir ~/kinship-cases/my-case             # check registers before the final report
+python scripts/build_tree.py --case-dir ~/kinship-cases/my-case                # interactive HTML family map
+python scripts/build_tree.py --case-dir ~/kinship-cases/my-case --shared       # map with living people's details hidden
 python scripts/build_pdf.py --html ~/kinship-cases/my-case/pdf-source/report.html --out ~/kinship-cases/my-case/report.pdf
 ```
 
@@ -76,6 +78,16 @@ check staged files before contributing, especially if moving an existing case.
 `build_pdf.py` needs Chrome, Chromium or Edge installed (or `CHROME_PATH`). With `--png-dir` it also renders pages to PNG for review if `pypdfium2` is available.
 
 Use static HTML with local or embedded images. Active HTML and network image sources are rejected; source links remain clickable. A failed render preserves any existing output PDF.
+
+## HTML family map
+
+`build_tree.py` uses the atlas template from the Genes project, bundled in `assets/family-tree/`. It creates one offline HTML file with embedded styles, scripts and fonts. Open `tree.html` directly in a browser; no web server or package installation is needed. Use `--out /path/to/map.html` to choose another output file.
+
+The map has name and alias search, person and relationship cards, zoom and panning, ancestor and descendant views, and a kinship path finder. Its download menu exports the map as SVG or its data as JSON. Cards include notes, claims and source references from the case registers. Positions and group selectors are generated from those registers.
+
+Candidates keep separate IDs. Hypotheses use dashed lines, people without active links have their own section, and contradicted relationships appear only in cards. Possible identity matches, godparents and relationships of unknown degree are excluded from kinship paths. The map preserves the registers and must be rebuilt after they change.
+
+`--shared` creates `tree-shared.html`. Living and potentially living people appear as initials without dates or aliases. All free-text biographies, relationship notes, source titles and source locations are withheld, including text in deceased people's cards that could name living relatives. Register IDs and the relationship structure remain in the shared file and its exports.
 
 ## Repository layout
 
@@ -97,6 +109,7 @@ references/
   familysearch-indexes.md       targeted browser research, permitted local snapshots and coverage
   ww1-search.md                 GWAR WWI person/locality search and source-image locators
 assets/                          case intake, CSV registers, research-state plan, final report template,
+                                 family-tree/ (HTML atlas template, UI strings, scripts, styles and licensed fonts),
                                  photos README template, readable PDF template (report-pdf.template.html)
 scripts/                         init_case.py, hash_artifact.py, audit_evidence.py, build_pdf.py, build_tree.py
                                  familysearch.py, gwar.py, register_search.py and shared local analysis modules
