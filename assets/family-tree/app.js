@@ -23,6 +23,7 @@ let activeView = 'all';
 let viewFocusId = rootId;
 let visibleIds = new Set(people.keys());
 let currentPath = null;
+let diagram = null;
 
 
 const SVG_STYLE = `
@@ -40,8 +41,10 @@ const SVG_STYLE = `
   .edge.document .edge-line{stroke:#1d5c57}.edge.hypothesis .edge-line{stroke:#8a5a0e;stroke-dasharray:8 5}
   .edge.spiritual .edge-line,.edge.godparent .edge-line{stroke:#6a4e79;stroke-dasharray:2 5}.edge.unplaced .edge-line{stroke:#4f5b57;stroke-dasharray:2 6}
   .edge.step .edge-line{stroke-dasharray:5 5}.edge.active .edge-line,.edge:focus-visible .edge-line,.edge:hover .edge-line{stroke-width:3.5}
-  .edge-label{font:11px 'Golos Text',Arial,sans-serif;fill:#4f5b57;paint-order:stroke;stroke:#efeadf;stroke-width:6px;stroke-linejoin:round;pointer-events:none}
-  .edge.unplaced .edge-label{fill:#4f5b57}.edge.spiritual .edge-label{fill:#6a4e79}
+  .edge-label{font:11px 'Golos Text',Arial,sans-serif;fill:#4f5b57;pointer-events:none}
+  .edge-caption{cursor:pointer;outline:none}.edge-caption rect{fill:#efeadf}
+  .edge-caption:focus-visible rect,.edge-caption:hover rect{stroke:#1d5c57;stroke-width:1.5}
+  .edge-caption.spiritual .edge-label{fill:#6a4e79}
   .view-hidden,.is-filtered{display:none}
 `;
 $('svg-styles').textContent = SVG_STYLE;
@@ -117,48 +120,151 @@ function initializeCopy() {
   }
 }
 
-function edgePath(edge) {
-  const a = people.get(edge.from), b = people.get(edge.to);
-  const ax = a.x + cardW / 2, bx = b.x + cardW / 2;
-  const ay = a.y + cardH, by = b.y;
-  if (edge.kind === 'parent') {
-    const union = treeData.unions.find((item) => item.parents.includes(a.id) && item.children.includes(b.id));
-    const rail = union.rail + union.parents.indexOf(a.id) * 13;
-    return `M${ax},${ay} V${rail} H${bx} V${by}`;
-  }
-  if (edge.kind === 'spouse' || edge.kind === 'partner') {
-    if (Math.abs(a.x - b.x) < 400) {
-      const left = a.x < b.x ? a : b, right = a.x < b.x ? b : a;
-      return `M${left.x + cardW},${left.y + cardH / 2} H${right.x}`;
+function layoutDiagram(data) {
+  if(!data.people.length)return {positions:new Map(),routes:new Map(),sections:[],width:data.width,height:data.height};
+  const rows=[...new Set(data.people.map((p)=>p.y))].sort((a,b)=>a-b);
+  const originals=new Map(data.people.map((p)=>[p.id,p]));
+  const lanes=rows.map(()=>[]),entries=new Map(),ports=new Map();
+  const w=data.cardWidth,h=data.cardHeight,pitch=56;
+  let width=data.width;
+  for(const edge of data.relationships){
+    const a=originals.get(edge.from),b=originals.get(edge.to);
+    const direct=['spouse','partner'].includes(edge.kind)&&a.y===b.y&&Math.abs(a.x-b.x)<=w+60;
+    const entry={edge,direct,gap:rows.indexOf(Math.min(a.y,b.y))};entries.set(edge.id,entry);
+    if(direct)continue;
+    for(const [node,other] of [[a,b],[b,a]]){
+      const side=other.y<node.y?'top':'bottom',key=node.id+':'+side;
+      if(!ports.has(key))ports.set(key,[]);
+      ports.get(key).push({edge:edge.id,otherX:other.x});
     }
-    const rail = Math.max(a.y, b.y) + cardH + 26;
-    return `M${ax},${ay} V${rail} H${bx} V${b.y + cardH}`;
   }
-  const rail = edge.rail ?? Math.max(ay, b.y + cardH) + 36;
-  return `M${ax},${ay} V${rail} H${bx} V${b.y + cardH}`;
+  for(const list of ports.values())list.sort((a,b)=>a.otherX-b.otherX||a.edge.localeCompare(b.edge));
+  const routed=[...entries.values()].filter((e)=>!e.direct).sort((a,b)=>{
+    const left=(e)=>Math.min(originals.get(e.edge.from).x,originals.get(e.edge.to).x);
+    return left(a)-left(b)||a.edge.id.localeCompare(b.edge.id);
+  });
+  for(const entry of routed){
+    const a=originals.get(entry.edge.from),b=originals.get(entry.edge.to);
+    const interval=[Math.min(a.x,b.x)-12,Math.max(a.x,b.x)+w+12];
+    const rowLanes=lanes[entry.gap];let lane=rowLanes.findIndex((items)=>items.every(([left,right])=>interval[1]<left||interval[0]>right));
+    if(lane<0){lane=rowLanes.length;rowLanes.push([]);}
+    rowLanes[lane].push(interval);entry.lane=lane;
+  }
+  const rowY=[rows[0]];
+  for(let i=1;i<rows.length;i++)rowY[i]=rowY[i-1]+h+Math.max(152,lanes[i-1].length*pitch+60);
+  const positions=new Map(data.people.map((p)=>[p.id,{x:p.x,y:rowY[rows.indexOf(p.y)]}]));
+  const verticals=[],routes=new Map();
+  function port(node,other,entry){
+    const side=other.y<node.y?'top':'bottom',list=ports.get(node.id+':'+side);
+    const index=list.findIndex((item)=>item.edge===entry.edge.id),position=positions.get(node.id);
+    const desired=node.x+12+(index+1)*(w-24)/(list.length+1);
+    const y=position.y+(side==='bottom'?h:0),rail=rowY[entry.gap]+h+36+entry.lane*pitch;
+    const top=Math.min(y,rail),bottom=Math.max(y,rail);
+    for(let step=0;step<=w;step+=12)for(const shift of step?[step,-step]:[0]){
+      const x=desired+shift;if(x<node.x+12||x>node.x+w-12)continue;
+      const blocked=verticals.some((v)=>Math.abs(v.x-x)<10&&Math.max(top,v.top)<Math.min(bottom,v.bottom)-.1)||data.people.some((p)=>{
+        if(p.id===node.id)return false;const q=positions.get(p.id);
+        return x>q.x-4&&x<q.x+w+4&&top<q.y+h-1&&bottom>q.y+1;
+      });
+      if(!blocked){verticals.push({x,top,bottom});return [x,y];}
+    }
+    return null;
+  }
+  for(const entry of routed){
+    const a=originals.get(entry.edge.from),b=originals.get(entry.edge.to);
+    const checkpoint=verticals.length;
+    const start=port(a,b,entry),end=port(b,a,entry),rail=rowY[entry.gap]+h+36+entry.lane*pitch;
+    if(start&&end){routes.set(entry.edge.id,{points:[start,[start[0],rail],[end[0],rail],end],rail});continue;}
+    // A link across a filled row needs a channel outside the cards.
+    verticals.length=checkpoint;
+    const A=positions.get(a.id),B=positions.get(b.id),aTop=b.y<a.y,bTop=a.y<b.y;
+    const ax=A.x+w/2,bx=B.x+w/2,ay=A.y+(aTop?0:h),by=B.y+(bTop?0:h);
+    const aRail=ay+(aTop?-16:16),bRail=by+(bTop?-16:16),outside=width+32;width=outside+32;
+    const points=[[ax,ay],[ax,aRail],[outside,aRail],[outside,bRail],[bx,bRail],[bx,by]];
+    for(let i=1;i<points.length;i++)if(points[i-1][0]===points[i][0])verticals.push({x:points[i][0],top:Math.min(points[i-1][1],points[i][1]),bottom:Math.max(points[i-1][1],points[i][1])});
+    routes.set(entry.edge.id,{points,rail:aRail});
+  }
+  for(const entry of entries.values())if(entry.direct){
+    const a=positions.get(entry.edge.from),b=positions.get(entry.edge.to),left=a.x<b.x?a:b,right=a.x<b.x?b:a;
+    routes.set(entry.edge.id,{points:[[left.x+w,left.y+h/2],[right.x,right.y+h/2]]});
+  }
+  const sections=data.sections.map((section)=>{
+    const index=rows.findIndex((y)=>y>=section.y);
+    return {...section,y:rowY[index<0?rows.length-1:index]-24};
+  });
+  return {positions,routes,sections,width,height:rowY.at(-1)+h+Math.max(100,lanes.at(-1).length*pitch+60)};
+}
+
+function edgePath(edge) {
+  return diagram.routes.get(edge.id).points.map(([x,y],i)=>`${i?'L':'M'}${x},${y}`).join(' ');
+}
+
+function placeDiagramLabels() {
+  const occupied=[],segments=[];
+  for(const route of diagram.routes.values())for(let i=1;i<route.points.length;i++)segments.push([route.points[i-1],route.points[i]]);
+  const cards=[...diagram.positions.values()].map((p)=>({x:p.x-8,y:p.y-8,width:cardW+16,height:cardH+16}));
+  const overlaps=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y;
+  const clear=(box)=>!cards.some((card)=>overlaps(box,card))&&!occupied.some((other)=>overlaps(box,{x:other.x-6,y:other.y-6,width:other.width+12,height:other.height+12}))&&!segments.some(([[x1,y1],[x2,y2]])=>{
+    if(Math.abs(x1-x2)<.1)return x1>box.x-4&&x1<box.x+box.width+4&&Math.min(y1,y2)<box.y+box.height+4&&Math.max(y1,y2)>box.y-4;
+    return y1>box.y-4&&y1<box.y+box.height+4&&Math.min(x1,x2)<box.x+box.width+4&&Math.max(x1,x2)>box.x-4;
+  });
+  function place(text,font,size,idealX,ys,left,right){
+    const lines=wrap(text,Math.max(80,Math.min(240,right-left-20)),font);textMeasure.font=font;
+    const metrics=lines.map((line)=>textMeasure.measureText(line));
+    const ascent=Math.max(...metrics.map((m)=>m.fontBoundingBoxAscent||m.actualBoundingBoxAscent||size));
+    const descent=Math.max(3,...metrics.map((m)=>m.fontBoundingBoxDescent||m.actualBoundingBoxDescent||3));
+    const lineHeight=Math.max(size+3,ascent+descent);
+    const width=Math.max(...metrics.map((m)=>m.width))+12,height=ascent+descent+(lines.length-1)*lineHeight+8;
+    const xs=[];for(let x=Math.max(8,left);x+width<=Math.min(diagram.width-8,right);x+=12)xs.push(x);
+    xs.push(Math.max(left+8,Math.min(idealX,right-width-8)));
+    const candidates=ys.flatMap((y)=>xs.map((x)=>({x,y:y-height,width,height}))).sort((a,b)=>Math.abs(a.x-idealX)+2*Math.abs(a.y-(ys[0]-height))-Math.abs(b.x-idealX)-2*Math.abs(b.y-(ys[0]-height)));
+    const box=candidates.find((candidate)=>candidate.y>=8&&candidate.y+height<diagram.height&&clear(candidate));
+    if(!box&&(left>8||right<diagram.width-8))return place(text,font,size,idealX,ys,8,diagram.width-8);
+    if(!box)throw new Error('No clear caption position: '+text);
+    occupied.push(box);return {...box,lines,size,ascent,lineHeight};
+  }
+  function draw(parent,box,className){
+    parent.append(element('rect',{x:box.x,y:box.y,width:box.width,height:box.height,rx:3,fill:'#efeadf'}));
+    const label=element('text',{x:box.x+6,y:box.y+box.ascent+4,class:className});
+    box.lines.forEach((line,i)=>label.append(element('tspan',{x:box.x+6,dy:i?box.lineHeight:0},line+(i<box.lines.length-1?' ':''))));parent.append(label);
+  }
+  for(const section of diagram.sections){
+    const box=place(section.text,'500 22px Literata, Georgia, serif',22,section.x,[section.y,section.y-28,section.y-56,section.y-84],8,diagram.width-8);
+    const group=element('g',{'data-section-label':section.text});draw(group,box,'graph-section');$('sections').append(group);
+  }
+  for(const edge of drawnRelationships){
+    const caption=edge.kind==='sibling'?ui.siblingLine:edge.kind==='unplaced'?(edge.label??ui.unplacedLine):edge.kind==='step'?ui.stepLine:null;
+    if(!caption)continue;
+    const route=diagram.routes.get(edge.id),left=Math.min(route.points[1][0],route.points[2][0]),right=Math.max(route.points[1][0],route.points[2][0]);
+    const ideal=edge.labelX??(left+right)/2;
+    const box=place(caption,"11px 'Golos Text', Arial, sans-serif",11,ideal-90,[route.rail-8,route.rail+46],left+6,right-6);
+    const group=element('g',{id:'label-'+edge.id,class:'edge-caption '+edge.status,'data-edge-label':edge.id,role:'button',tabindex:0,'aria-label':caption});draw(group,box,'edge-label');
+    group.addEventListener('click',()=>showRelationship(edge));group.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();showRelationship(edge);}});
+    $('edge-labels').append(group);
+  }
 }
 
 function renderGraph() {
-  svg.setAttribute('viewBox', `0 0 ${treeData.width} ${treeData.height}`);
+  diagram=layoutDiagram({...treeData,relationships:drawnRelationships});
+  if(!$('edge-labels'))svg.insertBefore(element('g',{id:'edge-labels'}),$('nodes'));
+  svg.insertBefore($('sections'),$('edge-labels'));
+  svg.setAttribute('viewBox', `0 0 ${diagram.width} ${diagram.height}`);
   svg.querySelector(':scope > rect')?.remove();
-  svg.insertBefore(element('rect', {x:0,y:0,width:treeData.width,height:treeData.height,fill:'#efeadf'}),$('sections'));
-  for (const id of ['sections','edges','nodes']) $(id).replaceChildren();
-  for (const section of treeData.sections) $('sections').append(element('text', {x:section.x,y:section.y,class:'graph-section'},section.text));
+  svg.insertBefore(element('rect', {x:0,y:0,width:diagram.width,height:diagram.height,fill:'#efeadf'}),svg.firstChild);
+  for (const id of ['sections','edge-labels','edges','nodes']) $(id).replaceChildren();
   for (const edge of drawnRelationships) {
     const title=`${ui.relationNames[edge.kind]}: ${fullName(people.get(edge.from))}, ${fullName(people.get(edge.to))}. ${ui[edge.status]}`;
     const group=element('g',{class:`edge ${edge.status} ${edge.kind}`,'data-edge':edge.id,role:'button',tabindex:'0','aria-label':title});
     group.append(element('title',{},title+(edge.note?'. '+edge.note:'')));
     for (const className of ['edge-underlay','edge-line','edge-hit']) group.append(element('path',{d:edgePath(edge),class:className}));
-    if (edge.kind==='sibling') group.append(element('text',{x:edge.labelX,y:edge.rail-12,'text-anchor':'middle',class:'edge-label'},ui.siblingLine));
-    if (edge.kind==='unplaced') group.append(element('text',{x:edge.labelX,y:edge.rail-11,'text-anchor':'middle',class:'edge-label'},edge.label??ui.unplacedLine));
-    if (edge.kind==='step') group.append(element('text',{x:edge.labelX,y:edge.rail-12,'text-anchor':'middle',class:'edge-label'},ui.stepLine));
     group.addEventListener('click',()=>showRelationship(edge));
     group.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();showRelationship(edge);}});
     $('edges').append(group);
   }
   for (const person of treeData.people) {
     const isRoot=person.id===rootId;
-    const group=element('g',{class:'person'+(isRoot?' root':''),'data-id':person.id,'data-family':person.family,transform:`translate(${person.x} ${person.y})`,role:'button',tabindex:'0','aria-label':`${fullName(person)}. ${person.role}. ${person.life}`});
+    const position=diagram.positions.get(person.id);
+    const group=element('g',{class:'person'+(isRoot?' root':''),'data-id':person.id,'data-family':person.family,transform:`translate(${position.x} ${position.y})`,role:'button',tabindex:'0','aria-label':`${fullName(person)}. ${person.role}. ${person.life}`});
     group.append(element('title',{},fullName(person)+'. '+person.role));
     group.append(element('rect',{width:cardW,height:cardH,rx:6,class:'card'}));
     if(isRoot){group.append(element('rect',{x:12,y:9,width:115,height:17,rx:3,fill:'#f1e4cc'}));group.append(element('text',{x:18,y:21,class:'card-root-label'},ui.rootShort));}
@@ -172,6 +278,7 @@ function renderGraph() {
     group.addEventListener('keydown',(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();showPerson(person.id);}});
     $('nodes').append(group);
   }
+  placeDiagramLabels();
 }
 
 function renderPeople(query = $('search').value) {
@@ -193,19 +300,22 @@ function setScale(value, anchorX = viewport.clientWidth / 2, anchorY = viewport.
   const previousOffset = surfaceOffset();
   const x = (viewport.scrollLeft + anchorX - previousOffset.x) / scale, y = (viewport.scrollTop + anchorY - previousOffset.y) / scale;
   scale = newScale;
-  surface.style.width = treeData.width * scale + 'px'; surface.style.height = treeData.height * scale + 'px';
-  svg.setAttribute('width', treeData.width * scale); svg.setAttribute('height', treeData.height * scale);
+  surface.style.width = diagram.width * scale + 'px'; surface.style.height = diagram.height * scale + 'px';
+  svg.setAttribute('width', diagram.width * scale); svg.setAttribute('height', diagram.height * scale);
   const offset = surfaceOffset();
   viewport.scrollLeft = x * scale + offset.x - anchorX; viewport.scrollTop = y * scale + offset.y - anchorY;
   $('zoom-value').textContent = Math.round(scale * 100) + '%';
 }
 
 function surfaceOffset() {
-  return {x:Math.max(0,viewport.clientWidth-treeData.width*scale)/2,y:Math.max(0,viewport.clientHeight-treeData.height*scale)/2};
+  return {x:Math.max(0,viewport.clientWidth-diagram.width*scale)/2,y:Math.max(0,viewport.clientHeight-diagram.height*scale)/2};
 }
 
 function fitPeople(items) {
   if(!items.length){$('map-status').textContent=ui.emptyView;return;}
+  items=items.length===people.size
+    ? [{x:0,y:0},{x:diagram.width-cardW,y:diagram.height-cardH}]
+    : items.map((person)=>diagram.positions.get(person.id));
   const minX=Math.min(...items.map((p)=>p.x))-45,minY=Math.min(...items.map((p)=>p.y))-65;
   const maxX=Math.max(...items.map((p)=>p.x+cardW))+45,maxY=Math.max(...items.map((p)=>p.y+cardH))+65;
   const nextScale=Math.min((viewport.clientWidth-24)/(maxX-minX),(viewport.clientHeight-90)/(maxY-minY),1);
@@ -217,10 +327,11 @@ function fitPeople(items) {
 
 function centerPerson(person) {
   if(!person||viewport.hidden)return;
+  const position=diagram.positions.get(person.id);
   setScale(Math.max(scale,.9));
   const offset=surfaceOffset();
-  viewport.scrollLeft=(person.x+cardW/2)*scale+offset.x-viewport.clientWidth/2;
-  viewport.scrollTop=(person.y+cardH/2)*scale+offset.y-viewport.clientHeight/2;
+  viewport.scrollLeft=(position.x+cardW/2)*scale+offset.x-viewport.clientWidth/2;
+  viewport.scrollTop=(position.y+cardH/2)*scale+offset.y-viewport.clientHeight/2;
 }
 
 function highlight(id) {
@@ -331,7 +442,7 @@ function download(text,type,filename) {
 
 function exportSvg() {
   const exported=svg.cloneNode(true);
-  exported.setAttribute('xmlns',ns); exported.setAttribute('width',treeData.width);exported.setAttribute('height',treeData.height);
+  exported.setAttribute('xmlns',ns); exported.setAttribute('width',diagram.width);exported.setAttribute('height',diagram.height);
   exported.querySelectorAll('.selected,.related,.active,.search-hit,.view-hidden,.is-filtered').forEach((node)=>node.classList.remove('selected','related','active','search-hit','view-hidden','is-filtered'));
   exported.querySelectorAll('[tabindex]').forEach((node)=>node.removeAttribute('tabindex'));
   download('<?xml version="1.0" encoding="UTF-8"?>\n'+new XMLSerializer().serializeToString(exported),'image/svg+xml','family-tree.svg');
@@ -361,6 +472,7 @@ function applyView() {
   if(activeBranch!=='all')visibleIds=new Set([...visibleIds].filter((id)=>people.get(id).family===activeBranch));
   document.querySelectorAll('.person').forEach((node)=>node.classList.toggle('view-hidden',!visibleIds.has(node.dataset.id)));
   document.querySelectorAll('.edge').forEach((node)=>{const edge=treeData.relationships.find((e)=>e.id===node.dataset.edge);node.classList.toggle('view-hidden',!visibleIds.has(edge.from)||!visibleIds.has(edge.to)||(activeView==='path'&&!currentPath?.edges.includes(edge.id)));node.classList.toggle('is-filtered',!$('show-hypotheses').checked&&edge.status==='hypothesis');});
+  document.querySelectorAll('.edge-caption').forEach((node)=>{const edge=svg.querySelector(`[data-edge="${CSS.escape(node.dataset.edgeLabel)}"]`);for(const state of ['view-hidden','is-filtered'])node.classList.toggle(state,edge.classList.contains(state));});
   $('sections').classList.toggle('view-hidden',activeView!=='all'||activeBranch!=='all');
   document.querySelectorAll('[data-view]').forEach((b)=>b.setAttribute('aria-pressed',String(b.dataset.view===activeView)));
   $('mobile-view').value=activeView;
@@ -479,7 +591,7 @@ function initializeControls() {
   $('path-form').addEventListener('submit',(event)=>{event.preventDefault();$('path-dialog').close();showPath();});
   viewport.addEventListener('wheel',(event)=>{if(!event.ctrlKey&&!event.metaKey)return;event.preventDefault();const rect=viewport.getBoundingClientRect();setScale(scale*Math.exp(-event.deltaY*.008),event.clientX-rect.left,event.clientY-rect.top);},{passive:false});
   viewport.addEventListener('pointerdown',(event)=>{
-    if(event.pointerType!=='mouse'||event.button!==0||event.target.closest('.person,.edge'))return;
+    if(event.pointerType!=='mouse'||event.button!==0||event.target.closest('.person,.edge,.edge-caption'))return;
     const rect=viewport.getBoundingClientRect();if(event.clientX-rect.left>=viewport.clientWidth||event.clientY-rect.top>=viewport.clientHeight)return;
     drag={id:event.pointerId,x:event.clientX,y:event.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};$('map-caption').hidden=true;viewport.setPointerCapture(event.pointerId);viewport.classList.add('dragging');viewport.focus({preventScroll:true});
   });

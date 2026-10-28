@@ -211,7 +211,7 @@ def atlas(case_dir: Path, shared: bool) -> tuple[dict, dict[str, int]]:
             "sources": sources(artifact_ids),
         }
 
-    # shortcut: generation rows can cross; use a graph layout engine if dense branches become unreadable.
+    # The viewer expands these rows to make room for connectors.
     card_w, card_h, gap, step = 224, 128, 48, 240
     sections, branches = [], {}
     x, bottom = 56, 0

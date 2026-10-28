@@ -131,6 +131,8 @@ New sources are welcome in `references/seed-sources.md`. Record verified owner, 
 
 Source-search helpers use Python's standard library and the existing case registers. Run `python3 -m unittest discover -s tests` to check local parsing, GWAR checkpoints, access failures, unresolved coverage and evidence registration against synthetic data. FamilySearch discovery and targeted viewing use the existing lawful browser session; its Python helpers analyze saved fragments. Keep private research files outside this checkout.
 
+Run `node --test tests/test_tree_layout.cjs` for the diagram routing checks, including separate connector lanes and links across occupied rows. Node.js is used for these tests; generating an HTML map still requires only Python.
+
 ## License
 
 [MIT](LICENSE) © 2026 Denis Shiryaev.
