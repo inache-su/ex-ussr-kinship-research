@@ -81,6 +81,7 @@ python scripts/hash_artifact.py ~/kinship-cases/my-case/scans/marriage-1902.jpg 
 python scripts/audit_evidence.py --case-dir ~/kinship-cases/my-case             # check registers before the final report
 python scripts/build_tree.py --case-dir ~/kinship-cases/my-case                # interactive HTML family map
 python scripts/build_tree.py --case-dir ~/kinship-cases/my-case --shared       # map with living people's details hidden
+python scripts/analyze_gedcom.py ~/kinship-cases/my-case/tree.ged              # leads to check in a GEDCOM tree
 ```
 
 `init_case.py` refuses to create a case inside the skill folder, including with
@@ -106,6 +107,8 @@ For PDF export, use static HTML with local or embedded images. The exporter reje
 An existing tree is research input and a set of leads, not proof of its relationships. The agent preserves the original file and keeps unresolved claims, unsupported details, evidence registers and the search log in the case folder. Exports follow the evaluated evidence and do not overwrite your files.
 
 You choose the software. Installing tree applications, configuring MCP connections and automatically synchronizing external trees are outside the skill's scope. See [the GEDCOM workflow](references/gedcom.md).
+
+`scripts/analyze_gedcom.py` scans a provided tree for leads to check against the records: weddings during fasts and other periods without church weddings, a first child born before or less than 260 days after the wedding, sibling names that repeat after an infant death or look like duplicates, patronymics that do not match the father's name, and clusters of deaths in one place. It reads unmarked dates before 1918 as Julian. The checks are adapted from Konstantin Popov's [genealogy-analyzer](https://github.com/tamvodopad/claude-code-skill-genealogy-analyzer) (MIT License, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 
 ## HTML family map
 
@@ -149,7 +152,8 @@ assets/                          case intake, CSV registers, research-state plan
 scripts/                         init_case.py, hash_artifact.py, audit_evidence.py, build_pdf.py, build_tree.py
                                  familysearch.py, gwar.py, register_search.py, scan_montage.py (needs Pillow)
                                  htr_search.py (fuzzy name search in recognized page text)
-                                 check_gedcom.py (optional GEDCOM lint), and shared local analysis modules
+                                 check_gedcom.py (optional GEDCOM lint), analyze_gedcom.py (leads in a GEDCOM tree),
+                                 and shared local analysis modules
 evals/discovery-and-logic.yaml   trigger and reasoning test cases
 tests/                           unit tests (python3 -m unittest discover -s tests)
 ```
