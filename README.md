@@ -148,6 +148,7 @@ assets/                          case intake, CSV registers, research-state plan
                                  photos README template, HTML report template (report.template.html)
 scripts/                         init_case.py, hash_artifact.py, audit_evidence.py, build_pdf.py, build_tree.py
                                  familysearch.py, gwar.py, register_search.py, scan_montage.py (needs Pillow)
+                                 htr_search.py (fuzzy name search in recognized page text)
                                  check_gedcom.py (optional GEDCOM lint), and shared local analysis modules
 evals/discovery-and-logic.yaml   trigger and reasoning test cases
 tests/                           unit tests (python3 -m unittest discover -s tests)
@@ -164,6 +165,8 @@ tests/                           unit tests (python3 -m unittest discover -s tes
 ## Contributing
 
 New sources are welcome in `references/seed-sources.md`. Record verified owner, jurisdiction, collection, provenance, IDs, access, restrictions and check date where known; mark gaps instead of guessing. Keep personal data out of examples.
+
+When a readable search log is present, the audit summary lists artifact IDs without a search-log reference. Use the list to check unlinked finds. User-supplied material may appear there without any action needed.
 
 Source-search helpers use Python's standard library and the existing case registers. Run `python3 -m unittest discover -s tests` to check local parsing, GWAR checkpoints, access failures, unresolved coverage and evidence registration against synthetic data. FamilySearch discovery and targeted viewing use the existing lawful browser session; its Python helpers analyze saved fragments. Keep private research files outside this checkout.
 
